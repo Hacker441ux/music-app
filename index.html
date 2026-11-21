@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Music Streaming System</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Helvetica, Arial, sans-serif; background: #000; color: #fff; height: 100vh; overflow: hidden; }
+  .hidden { display: none !important; }
+
+  /* ---------- page layout ---------- */
+  .app { display: grid; height: 100vh; padding: 8px; gap: 8px;
+         grid-template-columns: 240px 1fr; grid-template-rows: 64px 1fr 90px;
+         grid-template-areas: "side top" "side main" "player player"; }
+  .side { grid-area: side; background: #121212; border-radius: 8px; padding: 20px 12px; overflow-y: auto; }
+  .top { grid-area: top; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; background: #121212; border-radius: 8px; }
+  .main { grid-area: main; background: linear-gradient(#2a2a2a 0%, #121212 300px); border-radius: 8px; padding: 0 24px 24px; overflow-y: auto; }
+  .player { grid-area: player; background: #181818; border-radius: 8px; display: grid; grid-template-columns: 1fr 2fr 1fr; align-items: center; padding: 0 20px; }
+
+  .logo { font-size: 24px; font-weight: 800; color: #1db954; padding: 0 12px 20px; }
+  .nav-item { padding: 10px 12px; font-weight: 700; color: #b3b3b3; cursor: pointer; border-radius: 4px; }
+  .nav-item:hover, .nav-item.active { color: #fff; }
+  .lib-head { margin: 24px 12px 10px; font-weight: 700; color: #b3b3b3; }
+  .new-pl { display: flex; gap: 6px; padding: 0 12px 12px; }
+  .new-pl input { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 16px; border: 1px solid #333; background: #242424; color: #fff; }
+  .pl-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+  .pl-item:hover { background: #1a1a1a; }
+  .pl-item.sel { background: #282828; }
+  .pl-item .pl-name { font-weight: 700; }
+  .pl-item small, .muted { color: #b3b3b3; }
+
+  select { padding: 8px 12px; border-radius: 16px; border: none; background: #242424; color: #fff; font-weight: 700; }
+  .search { flex: 1; max-width: 420px; padding: 9px 14px; border-radius: 20px; border: none; background: #242424; color: #fff; font-size: 14px; }
+  .tab-btn { background: #242424; color: #fff; border: none; padding: 8px 16px; border-radius: 16px; font-weight: 700; cursor: pointer; font-size: 14px; }
+  .tab-btn.on { background: #1db954; color: #000; }
+  .small-pill { background: #242424; color: #fff; border: none; padding: 8px 12px; border-radius: 16px; font-weight: 700; cursor: pointer; font-size: 13px; }
+  .small-pill:hover { background: #333; }
+
+  /* ---------- music view ---------- */
+  .head { padding-top: 40px; display: flex; align-items: flex-end; gap: 16px; }
+  .cover { width: 150px; height: 150px; background: linear-gradient(135deg, #1db954, #0b4f26); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 60px; box-shadow: 0 4px 60px rgba(0,0,0,.5); }
+  .head h1 { margin: 0; font-size: 48px; }
+  .actions { display: flex; gap: 10px; align-items: center; padding: 24px 0; flex-wrap: wrap; }
+  .play-big { width: 56px; height: 56px; border-radius: 50%; border: none; background: #1db954; color: #000; font-size: 22px; cursor: pointer; }
+  .play-big:hover { transform: scale(1.05); }
+  .ghost { background: transparent; color: #b3b3b3; border: 1px solid #727272; border-radius: 16px; padding: 6px 14px; cursor: pointer; font-weight: 700; }
+  .ghost:hover { border-color: #fff; color: #fff; }
+  table.songs { width: 100%; border-collapse: collapse; }
+  table.songs th { text-align: left; color: #b3b3b3; font-weight: 400; font-size: 13px; padding: 8px 12px; border-bottom: 1px solid #2a2a2a; }
+  table.songs th.sortable { cursor: pointer; }
+  table.songs th.sortable:hover { color: #fff; }
+  table.songs td { padding: 10px 12px; color: #b3b3b3; font-size: 14px; }
+  table.songs tr:hover { background: rgba(255,255,255,.1); }
+  table.songs tr.now td, table.songs tr.now .t { color: #1db954; }
+  td.idx { width: 50px; }
+  .rowplay { display: none; background: none; border: none; color: #fff; cursor: pointer; }
+  tr:hover .idx span { display: none; }
+  tr:hover .rowplay { display: inline; }
+  .t { color: #fff; font-weight: 700; font-size: 16px; }
+  .a { font-size: 13px; }
+  .like { background: none; border: none; font-size: 18px; color: #b3b3b3; cursor: pointer; }
+  .like.on { color: #1db954; }
+  .small { background: #242424; border: none; color: #fff; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-size: 16px; }
+  .small.danger:hover { background: #e22134; }
+  .empty { text-align: center; padding: 40px; }
+
+  .section { margin-top: 32px; }
+  .section h2 { font-size: 22px; margin: 0 0 10px; }
+  .top-row { display: flex; align-items: center; gap: 14px; padding: 8px; border-radius: 6px; background: #181818; margin-bottom: 6px; }
+  .top-row .rank { font-size: 20px; font-weight: 800; color: #b3b3b3; width: 28px; }
+  .top-row .info { flex: 1; }
+  .top-row .info div:first-child { font-weight: 700; }
+  .top-row .info small { color: #b3b3b3; }
+  .history div { padding: 6px 0; color: #b3b3b3; font-size: 14px; border-bottom: 1px solid #2a2a2a; }
+
+  /* ---------- player ---------- */
+  .now { display: flex; flex-direction: column; }
+  .now .n { font-weight: 700; font-size: 14px; }
+  .now .ar { color: #b3b3b3; font-size: 12px; }
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .btns { display: flex; align-items: center; gap: 20px; }
+  .btns button { background: none; border: none; color: #b3b3b3; font-size: 20px; cursor: pointer; }
+  .btns button:hover { color: #fff; }
+  .btns button.on { color: #1db954; }
+  .btns .main-btn { width: 36px; height: 36px; border-radius: 50%; background: #fff; color: #000; font-size: 16px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 560px; color: #b3b3b3; font-size: 12px; }
+  .bar { flex: 1; height: 4px; background: #4d4d4d; border-radius: 2px; overflow: hidden; }
+  .fill { height: 100%; width: 0%; background: #1db954; }
+  .right { text-align: right; color: #b3b3b3; font-size: 12px; }
+
+  /* ---------- admin view ---------- */
+  .admin { grid-area: main; background: #121212; border-radius: 8px; display: grid; grid-template-columns: 260px 1fr; overflow: hidden; }
+  .admin aside { padding: 16px; overflow-y: auto; border-right: 1px solid #282828; }
+  .admin aside h3 { color: #b3b3b3; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+  .tb { display: flex; justify-content: space-between; padding: 10px 12px; border-radius: 6px; cursor: pointer; font-weight: 700; }
+  .tb:hover { background: #1f1f1f; }
+  .tb span { color: #b3b3b3; font-weight: 400; }
+  .admin main { padding: 20px; overflow: auto; }
+  .admin h2 { margin: 0 0 6px; }
+  textarea { width: 100%; height: 100px; background: #181818; color: #1db954; border: 1px solid #333; border-radius: 6px; padding: 10px; font-family: Consolas, monospace; font-size: 14px; }
+  .pill { background: #1db954; border: none; color: #000; font-weight: 700; padding: 9px 20px; border-radius: 20px; cursor: pointer; margin: 10px 8px 0 0; }
+  .pill.red { background: #e22134; color: #fff; }
+  .pill.grey { background: #333; color: #fff; }
+  #status { margin: 12px 0; font-size: 14px; color: #b3b3b3; }
+  #status.error { color: #ff6b6b; }
+  .scroll { overflow: auto; border: 1px solid #282828; border-radius: 6px; max-height: 50vh; margin-top: 8px; }
+  .scroll table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .scroll th { background: #282828; text-align: left; padding: 8px 10px; position: sticky; top: 0; }
+  .scroll td { padding: 7px 10px; border-top: 1px solid #222; color: #ddd; white-space: nowrap; }
+
+  /* ---------- popup ---------- */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .modal { background: #282828; padding: 24px; border-radius: 8px; width: 320px; max-height: 80vh; overflow-y: auto; }
+  .modal h3 { margin-top: 0; }
+  .modal button.wide { display: block; width: 100%; margin: 6px 0; text-align: left; }
+  #loading { position: fixed; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #1db954; z-index: 20; }
+</style>
+</head>
+<body>
+
+<div id="loading">Loading music library…</div>
+
+<div class="app">
+
+  <!-- LEFT SIDEBAR (music view only) -->
+  <aside class="side" id="sidebar">
+    <div class="logo">♪ Music</div>
+    <div class="nav-item active" onclick="showAll()">⌂ &nbsp;Home</div>
+    <div class="lib-head">Your Library</div>
+    <div class="new-pl">
+      <input id="newName" placeholder="New playlist name" onkeydown="if(event.key==='Enter')createPlaylist()">
+      <button class="small" onclick="createPlaylist()" title="Create playlist">+</button>
+    </div>
+    <div id="playlistList"></div>
+  </aside>
+
+  <!-- TOP BAR -->
+  <header class="top">
+    <div style="display:flex;gap:8px;align-items:center">
+      User <select id="userSelect"></select>
+      <button class="small-pill" onclick="addUser()">+ New user</button>
+    </div>
+    <input class="search" id="searchBox" placeholder="Search songs, artists, albums" oninput="setSearch(this.value)">
+    <div>
+      <button class="tab-btn on" id="tabMusic" onclick="showTab('music')">Music</button>
+      <button class="tab-btn" id="tabAdmin" onclick="showTab('admin')">Admin Database</button>
+    </div>
+  </header>
+
+  <!-- MUSIC MAIN AREA -->
+  <main class="main" id="musicMain">
+    <div class="head">
+      <div class="cover">♪</div>
+      <div>
+        <small class="muted" id="viewKind">LIBRARY</small>
+        <h1 id="viewTitle">All Songs</h1>
+        <p class="muted" id="viewSub"></p>
+      </div>
+    </div>
+    <div class="actions" id="viewActions"></div>
+
+    <table class="songs">
+      <thead id="songHead"></thead>
+      <tbody id="songRows"></tbody>
+    </table>
+
+    <div class="section" id="topSection">
+      <h2>Top played</h2>
+      <div id="topPlayed"></div>
+    </div>
+
+    <div class="section history">
+      <h2>Recently played</h2>
+      <div id="history"></div>
+    </div>
+  </main>
+
+  <!-- ADMIN MAIN AREA -->
+  <section class="admin hidden" id="adminMain">
+    <aside>
+      <h3>Tables</h3>
+      <div id="tables"></div>
+    </aside>
+    <main>
+      <h2>Database Admin</h2>
+      <p class="muted" style="font-size:13px">Click a table to view its rows, pick an example query, or type your own SELECT query.</p>
+      <select id="preset" onchange="usePreset(this.value)">
+        <option value="">Example queries…</option>
+        <option value="songs">Songs with artist and album (JOIN)</option>
+        <option value="plays_per_artist">Total plays per artist (GROUP BY)</option>
+        <option value="playlist_counts">Playlists with song count (LEFT JOIN)</option>
+        <option value="most_liked">Most liked songs (LEFT JOIN + GROUP BY)</option>
+        <option value="inactive_users">Users who never played anything (IS NULL)</option>
+        <option value="history">Full listening history (3-table JOIN)</option>
+      </select>
+      <br><br>
+      <textarea id="sql">SELECT * FROM songs;</textarea><br>
+      <button class="pill" onclick="runAdminQuery()">Run Query</button>
+      <button class="pill grey" onclick="downloadDb()">Download database file</button>
+      <button class="pill red" onclick="resetDb()">Reset to sample data</button>
+      <div id="status"></div>
+      <div class="scroll"><table id="result"></table></div>
+    </main>
+  </section>
+
+  <!-- BOTTOM PLAYER -->
+  <footer class="player">
+    <div class="now">
+      <div class="n" id="nowTitle">Nothing playing</div>
+      <div class="ar" id="nowArtist"></div>
+    </div>
+    <div class="controls">
+      <div class="btns">
+        <button id="shuffleBtn" onclick="toggleShuffle()" title="Shuffle">🔀</button>
+        <button onclick="move(-1)" title="Previous">⏮</button>
+        <button class="main-btn" id="playBtn" onclick="togglePlay()" title="Play / Pause (Space)">▶</button>
+        <button onclick="move(1)" title="Next">⏭</button>
+        <button id="repeatBtn" onclick="cycleRepeat()" title="Repeat">🔁</button>
+      </div>
+      <div class="bar-row">
+        <span id="posText">0:00</span>
+        <div class="bar"><div class="fill" id="fill"></div></div>
+        <span id="durText">0:00</span>
+      </div>
+    </div>
+    <div class="right">Playing from: <span id="fromText">All songs</span></div>
+  </footer>
+
+</div>
+
+<script>
+  // =====================================================================
+  //  DATABASE SCHEMA AND SAMPLE DATA (created the first time the page opens)
+  // =====================================================================
+  const STORAGE_KEY = "music_web_database_v1";
+
+  const SCHEMA = `
+    CREATE TABLE users (
+      user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE artists (
+      artist_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      country TEXT
+    );
+    CREATE TABLE albums (
+      album_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      artist_id INTEGER NOT NULL REFERENCES artists(artist_id) ON DELETE CASCADE,
+      release_year INTEGER
+    );
+    CREATE TABLE songs (
+      song_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      album_id INTEGER NOT NULL REFERENCES albums(album_id) ON DELETE CASCADE,
+      duration_sec INTEGER NOT NULL CHECK (duration_sec > 0),
+      play_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE playlists (
+      playlist_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      name TEXT NOT NULL
+    );
+    CREATE TABLE playlist_songs (
+      playlist_id INTEGER REFERENCES playlists(playlist_id) ON DELETE CASCADE,
+      song_id INTEGER REFERENCES songs(song_id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      PRIMARY KEY (playlist_id, song_id)
+    );
+    CREATE TABLE likes (
+      user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+      song_id INTEGER REFERENCES songs(song_id) ON DELETE CASCADE,
+      PRIMARY KEY (user_id, song_id)
+    );
+    CREATE TABLE listening_history (
+      history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      song_id INTEGER NOT NULL REFERENCES songs(song_id) ON DELETE CASCADE,
+      played_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE playback_state (
+      user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+      playlist_id INTEGER REFERENCES playlists(playlist_id) ON DELETE SET NULL,
+      song_id INTEGER REFERENCES songs(song_id) ON DELETE SET NULL,
+      position_sec INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'paused' CHECK (status IN ('playing', 'paused'))
+    );
+
+    INSERT INTO users (name, email) VALUES
+      ('Aisha Khan', 'aisha@example.com'),
+      ('Rahul Sharma', 'rahul@example.com');
+    INSERT INTO artists (name, country) VALUES
+      ('Neon Raga', 'India'),
+      ('The Midnight Keys', 'USA');
+    INSERT INTO albums (title, artist_id, release_year) VALUES
+      ('Night Drive', 1, 2023),
+      ('Golden Hour', 2, 2022);
+    INSERT INTO songs (title, album_id, duration_sec, play_count) VALUES
+      ('Midnight Drive', 1, 215, 0),
+      ('City Lights', 1, 198, 0),
+      ('Rainy Road', 1, 240, 0),
+      ('Golden Morning', 2, 205, 0),
+      ('Sunset Lane', 2, 230, 0),
+      ('Slow Waves', 2, 185, 0);
+    INSERT INTO playlists (user_id, name) VALUES (1, 'My Favourites');
+    INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (1, 1, 1), (1, 4, 2), (1, 5, 3);
+    INSERT INTO likes (user_id, song_id) VALUES (1, 1), (2, 1), (2, 4);
+  `;
+
+  const STATE_SQL = `
+    SELECT p.user_id, p.playlist_id, p.song_id, p.position_sec, p.status,
+           s.title AS song_title, s.duration_sec, ar.name AS artist
+    FROM playback_state p
+    LEFT JOIN songs s    ON p.song_id = s.song_id
+    LEFT JOIN albums al  ON s.album_id = al.album_id
+    LEFT JOIN artists ar ON al.artist_id = ar.artist_id
+    WHERE p.user_id = ?`;
+
+  const PRESETS = {
+    songs: `SELECT s.title, ar.name AS artist, al.title AS album, s.play_count
+            FROM songs s
+            JOIN albums al  ON s.album_id = al.album_id
+            JOIN artists ar ON al.artist_id = ar.artist_id;`,
+    plays_per_artist: `SELECT ar.name AS artist, SUM(s.play_count) AS total_plays
+            FROM artists ar
+            JOIN albums al ON ar.artist_id = al.artist_id
+            JOIN songs s   ON al.album_id = s.album_id
+            GROUP BY ar.artist_id, ar.name
+            ORDER BY total_plays DESC;`,
+    playlist_counts: `SELECT p.name AS playlist, u.name AS owner, COUNT(ps.song_id) AS songs
+            FROM playlists p
+            JOIN users u ON p.user_id = u.user_id
+            LEFT JOIN playlist_songs ps ON p.playlist_id = ps.playlist_id
+            GROUP BY p.playlist_id, p.name, u.name;`,
+    most_liked: `SELECT s.title, COUNT(l.user_id) AS likes
+            FROM songs s
+            LEFT JOIN likes l ON s.song_id = l.song_id
+            GROUP BY s.song_id, s.title
+            ORDER BY likes DESC;`,
+    inactive_users: `SELECT u.name
+            FROM users u
+            LEFT JOIN listening_history h ON u.user_id = h.user_id
+            WHERE h.history_id IS NULL;`,
+    history: `SELECT u.name AS user, s.title AS song, h.played_at
+            FROM listening_history h
+            JOIN users u ON h.user_id = u.user_id
+            JOIN songs s ON h.song_id = s.song_id
+            ORDER BY h.history_id DESC;`
+  };
+
+  // =====================================================================
+  //  DATABASE ENGINE HELPERS
+  // =====================================================================
+  let SQL = null;     // sql.js engine
+  let db = null;      // the open database
+
+  let view = { type: "all", id: null };   // "all" or "playlist"
+  let songs = [], playlists = [], state = {};
+  let search = "";
+  let sortKey = null, sortDir = 1;        // sort only in the "all songs" view
+  let shuffle = false;
+  let repeat = "off";                     // "off" | "all" | "one"
+  let busy = false;
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const fmt = sec => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+  const uid = () => Number($("userSelect").value);
+
+  // Run a SELECT and return an array of plain objects
+  function q(sql, params = []) {
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows;
+  }
+  const one = (sql, params = []) => q(sql, params)[0] || null;
+
+  // Save the whole database into the browser's storage after every change
+  function save() {
+    const bytes = db.export();            // export() resets PRAGMAs, so set them again below
+    let text = "";
+    for (let i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
+    localStorage.setItem(STORAGE_KEY, btoa(text));
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+
+  function loadBytes(base64) {
+    const text = atob(base64);
+    const bytes = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+    return bytes;
+  }
+
+  function openDatabase() {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      db = new SQL.Database(loadBytes(saved));
+    } else {
+      db = new SQL.Database();
+      db.exec(SCHEMA);
+    }
+    db.exec("PRAGMA foreign_keys = ON");
+    if (!saved) save();
+  }
+
+  // Wrap every user action: show errors, then refresh the screen
+  async function act(fn) {
+    try { await fn(); }
+    catch (e) { alert(e.message); }
+    loadAll();
+  }
+
+  // =====================================================================
+  //  STARTUP
+  // =====================================================================
+  async function start() {
+    try {
+      SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
+    } catch (e) {
+      $("loading").textContent = "Could not load the database engine. Check your internet connection and refresh.";
+      return;
+    }
+    openDatabase();
+    fillUsers();
+    $("userSelect").onchange = () => { view = { type: "all", id: null }; loadAll(); };
+    $("loading").remove();
+    updateModeButtons();
+    loadAll();
+    setInterval(tick, 1000);
+  }
+
+  function fillUsers(selectId) {
+    const users = q("SELECT user_id, name FROM users ORDER BY name");
+    $("userSelect").innerHTML = users.map(u => `<option value="${u.user_id}">${esc(u.name)}</option>`).join("");
+    if (selectId) $("userSelect").value = selectId;
+  }
+
+  // =====================================================================
+  //  LOAD AND DRAW THE MUSIC SCREEN
+  // =====================================================================
+  function loadAll() {
+    const u = uid();
+    playlists = q("SELECT playlist_id, name FROM playlists WHERE user_id = ? ORDER BY name", [u]);
+    playlists.forEach(p => {
+      p.songs = q(`SELECT s.song_id, s.title, ar.name AS artist
+                   FROM playlist_songs ps
+                   JOIN songs s    ON ps.song_id = s.song_id
+                   JOIN albums al  ON s.album_id = al.album_id
+                   JOIN artists ar ON al.artist_id = ar.artist_id
+                   WHERE ps.playlist_id = ? ORDER BY ps.position`, [p.playlist_id]);
+    });
+    songs = q(`SELECT s.song_id, s.title, s.duration_sec, s.play_count,
+                      ar.name AS artist, al.title AS album,
+                      (SELECT COUNT(*) FROM likes lk WHERE lk.song_id = s.song_id) AS likes,
+                      EXISTS (SELECT 1 FROM likes lk WHERE lk.song_id = s.song_id AND lk.user_id = ?) AS liked
+               FROM songs s
+               JOIN albums al  ON s.album_id = al.album_id
+               JOIN artists ar ON al.artist_id = ar.artist_id
+               ORDER BY s.song_id`, [u]);
+    state = readState(u);
+    renderSidebar();
+    renderView();
+    renderTopPlayed();
+    renderPlayer();
+    renderHistory();
+  }
+
+  function renderSidebar() {
+    $("playlistList").innerHTML = playlists.map(p => `
+      <div class="pl-item ${view.type === "playlist" && view.id === p.playlist_id ? "sel" : ""}"
+           onclick="openPlaylist(${p.playlist_id})">
+        <div class="pl-name">${esc(p.name)}</div>
+        <small>Playlist • ${p.songs.length} songs</small>
+      </div>`).join("") || "<small class='muted' style='padding:0 12px'>No playlists yet</small>";
+  }
+
+  // Songs of the current view (playlist order, or the whole library)
+  function currentSongs() {
+    if (view.type === "playlist") {
+      const p = playlists.find(x => x.playlist_id === view.id);
+      if (!p) { view = { type: "all", id: null }; return songs; }
+      return p.songs.map(ps => songs.find(s => s.song_id === ps.song_id)).filter(Boolean);
+    }
+    return songs;
+  }
+
+  // Songs after search and sorting are applied
+  function visibleSongs() {
+    let list = currentSongs();
+    const term = search.trim().toLowerCase();
+    if (term) {
+      list = list.filter(s => `${s.title} ${s.artist} ${s.album || ""}`.toLowerCase().includes(term));
+    }
+    if (view.type === "all" && sortKey) {
+      list = [...list].sort((a, b) => {
+        const x = a[sortKey], y = b[sortKey];
+        const result = typeof x === "string" ? x.localeCompare(y) : x - y;
+        return result * sortDir;
+      });
+    }
+    return list;
+  }
+
+  function arrow(key) {
+    return sortKey === key ? (sortDir === 1 ? " ▲" : " ▼") : "";
+  }
+
+  function renderView() {
+    const list = visibleSongs();
+    const inPlaylist = view.type === "playlist";
+    const plId = inPlaylist ? view.id : "null";
+
+    // Heading and buttons
+    if (inPlaylist) {
+      const p = playlists.find(x => x.playlist_id === view.id);
+      $("viewKind").textContent = "PLAYLIST";
+      $("viewTitle").textContent = p.name;
+      $("viewSub").textContent = `${p.songs.length} songs`;
+      $("viewActions").innerHTML = `
+        <button class="play-big" onclick="playView()">▶</button>
+        <button class="ghost" onclick="renamePlaylist(${p.playlist_id})">Rename</button>
+        <button class="ghost" onclick="deletePlaylist(${p.playlist_id})">Delete playlist</button>`;
+      $("fromText").textContent = p.name;
+    } else {
+      $("viewKind").textContent = "LIBRARY";
+      $("viewTitle").textContent = "All Songs";
+      $("viewSub").textContent = `${songs.length} songs in library`;
+      $("viewActions").innerHTML = `<button class="play-big" onclick="playView()">▶</button>`;
+      $("fromText").textContent = "All songs";
+    }
+
+    // Table header (clickable sorting in library view)
+    const sortTh = (key, label) => view.type === "all"
+      ? `<th class="sortable" onclick="sortBy('${key}')">${label}${arrow(key)}</th>`
+      : `<th>${label}</th>`;
+    $("songHead").innerHTML = `<tr>
+        <th>#</th>${sortTh("title", "Title")}${sortTh("album", "Album")}${sortTh("play_count", "Plays")}
+        <th>Like</th>${sortTh("duration_sec", "Time")}<th></th></tr>`;
+
+    // Rows
+    $("songRows").innerHTML = list.map((s, i) => `
+      <tr class="${state.song_id === s.song_id ? "now" : ""}">
+        <td class="idx">
+          <span>${i + 1}</span>
+          <button class="rowplay" onclick="playSong(${s.song_id}, ${plId})">▶</button>
+        </td>
+        <td><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist)}</div></td>
+        <td>${esc(s.album)}</td>
+        <td>${s.play_count}</td>
+        <td><button class="like ${s.liked ? "on" : ""}" onclick="toggleLike(${s.song_id})">${s.liked ? "♥" : "♡"}</button></td>
+        <td>${fmt(s.duration_sec)}</td>
+        <td>${inPlaylist
+          ? `<button class="small danger" onclick="removeFromPlaylist(${plId}, ${s.song_id})" title="Remove from playlist">✕</button>`
+          : `<button class="small" onclick="openPicker(${s.song_id})" title="Add to playlist">+</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="7" class="empty">${search ? "No songs match your search" : "Nothing here yet"}</td></tr>`;
+
+    $("topSection").classList.toggle("hidden", inPlaylist || !!search);
+  }
+
+  function renderTopPlayed() {
+    const top = [...songs].filter(s => s.play_count > 0)
+      .sort((a, b) => b.play_count - a.play_count).slice(0, 5);
+    $("topPlayed").innerHTML = top.map((s, i) => `
+      <div class="top-row">
+        <div class="rank">${i + 1}</div>
+        <div class="info"><div>${esc(s.title)}</div><small>${esc(s.artist)}</small></div>
+        <small>${s.play_count} plays</small>
+        <button class="small" onclick="playSong(${s.song_id}, null)">▶</button>
+      </div>`).join("") || "<small class='muted'>Play some songs to see your top list here</small>";
+  }
+
+  function renderHistory() {
+    const rows = q(`SELECT s.title, ar.name AS artist
+                    FROM listening_history h
+                    JOIN songs s    ON h.song_id = s.song_id
+                    JOIN albums al  ON s.album_id = al.album_id
+                    JOIN artists ar ON al.artist_id = ar.artist_id
+                    WHERE h.user_id = ? ORDER BY h.history_id DESC LIMIT 20`, [uid()]);
+    $("history").innerHTML = rows.map(r => `<div>${esc(r.title)} <span>- ${esc(r.artist)}</span></div>`).join("")
+      || "<div>No listening history yet</div>";
+  }
+
+  function showAll() { view = { type: "all", id: null }; loadAll(); }
+  function openPlaylist(id) { view = { type: "playlist", id }; loadAll(); }
+  function setSearch(value) { search = value; renderView(); $("topSection").classList.toggle("hidden", view.type === "playlist" || !!search); }
+  function sortBy(key) {
+    if (sortKey === key) sortDir *= -1;
+    else { sortKey = key; sortDir = 1; }
+    renderView();
+  }
+
+  // =====================================================================
+  //  USERS
+  // =====================================================================
+  function addUser() {
+    const box = document.createElement("div");
+    box.className = "overlay";
+    box.innerHTML = `
+      <div class="modal">
+        <h3>Add new user</h3>
+        <input id="nuName" placeholder="Full name"
+               style="width:100%;padding:9px;margin:6px 0;border-radius:6px;border:1px solid #444;background:#242424;color:#fff">
+        <input id="nuEmail" placeholder="Email address"
+               style="width:100%;padding:9px;margin:6px 0;border-radius:6px;border:1px solid #444;background:#242424;color:#fff">
+        <p id="nuError" style="color:#ff6b6b;font-size:13px;min-height:18px;margin:6px 0"></p>
+        <button class="pill" id="nuSave">Save user</button>
+        <button class="ghost" data-close="1">Cancel</button>
+      </div>`;
+
+    const showError = msg => { box.querySelector("#nuError").textContent = msg; };
+    box.addEventListener("click", e => { if (e.target === box || e.target.dataset.close) box.remove(); });
+
+    box.querySelector("#nuSave").onclick = () => {
+      const name = box.querySelector("#nuName").value.trim();
+      const email = box.querySelector("#nuEmail").value.trim();
+      if (!name) return showError("Please enter a name");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError("Please enter a valid email");
+      try {
+        db.run("INSERT INTO users (name, email) VALUES (?, ?)", [name, email]);
+        const id = one("SELECT last_insert_rowid() AS id").id;
+        save();
+        box.remove();
+        view = { type: "all", id: null };
+        fillUsers(id);
+        loadAll();
+      } catch (e) {
+        showError(e.message.includes("UNIQUE") ? "This email is already registered" : e.message);
+      }
+    };
+
+    document.body.appendChild(box);
+    box.querySelector("#nuName").focus();
+  }
+
+  // =====================================================================
+  //  PLAYLISTS AND LIKES
+  // =====================================================================
+  function createPlaylist() {
+    act(() => {
+      const name = $("newName").value.trim();
+      if (!name) throw new Error("Please type a playlist name");
+      db.run("INSERT INTO playlists (user_id, name) VALUES (?, ?)", [uid(), name]);
+      $("newName").value = "";
+      save();
+    });
+  }
+
+  function renamePlaylist(id) {
+    const p = playlists.find(x => x.playlist_id === id);
+    const name = prompt("New name for the playlist:", p.name);
+    if (!name || !name.trim()) return;
+    act(() => {
+      db.run("UPDATE playlists SET name = ? WHERE playlist_id = ?", [name.trim(), id]);
+      save();
+    });
+  }
+
+  function deletePlaylist(id) {
+    if (!confirm("Delete this playlist?")) return;
+    act(() => {
+      db.run("DELETE FROM playlists WHERE playlist_id = ?", [id]);
+      save();
+      view = { type: "all", id: null };
+    });
+  }
+
+  function addToPlaylist(songId, playlistId) {
+    return act(() => {
+      if (one("SELECT 1 AS x FROM playlist_songs WHERE playlist_id = ? AND song_id = ?", [playlistId, songId]))
+        throw new Error("This song is already in the playlist");
+      const next = one("SELECT COALESCE(MAX(position), 0) + 1 AS p FROM playlist_songs WHERE playlist_id = ?", [playlistId]).p;
+      db.run("INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)", [playlistId, songId, next]);
+      save();
+    });
+  }
+
+  function removeFromPlaylist(playlistId, songId) {
+    act(() => {
+      db.run("DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?", [playlistId, songId]);
+      save();
+    });
+  }
+
+  // Popup that lets the user choose a playlist for a song
+  function openPicker(songId) {
+    const box = document.createElement("div");
+    box.className = "overlay";
+    box.innerHTML = `
+      <div class="modal">
+        <h3>Add to playlist</h3>
+        ${playlists.map(p => `<button class="ghost wide" data-pid="${p.playlist_id}">${esc(p.name)}</button>`).join("")
+          || "<p class='muted'>Create a playlist first from the left side.</p>"}
+        <button class="ghost wide" data-close="1">Close</button>
+      </div>`;
+    box.addEventListener("click", async e => {
+      if (e.target === box || e.target.dataset.close) { box.remove(); return; }
+      if (e.target.dataset.pid) {
+        box.remove();
+        await addToPlaylist(songId, Number(e.target.dataset.pid));
+      }
+    });
+    document.body.appendChild(box);
+  }
+
+  function toggleLike(songId) {
+    act(() => {
+      const u = uid();
+      if (one("SELECT 1 AS x FROM likes WHERE user_id = ? AND song_id = ?", [u, songId]))
+        db.run("DELETE FROM likes WHERE user_id = ? AND song_id = ?", [u, songId]);
+      else
+        db.run("INSERT INTO likes (user_id, song_id) VALUES (?, ?)", [u, songId]);
+      save();
+    });
+  }
+
+  // =====================================================================
+  //  PLAYBACK CONTROL
+  // =====================================================================
+  function readState(u) {
+    db.run("INSERT OR IGNORE INTO playback_state (user_id) VALUES (?)", [u]);
+    return one(STATE_SQL, [u]);
+  }
+
+  function getQueue(playlistId) {
+    const rows = playlistId
+      ? q("SELECT song_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position", [playlistId])
+      : q("SELECT song_id FROM songs ORDER BY song_id");
+    return rows.map(r => r.song_id);
+  }
+
+  function startSong(u, playlistId, songId) {
+    db.run("UPDATE playback_state SET playlist_id = ?, song_id = ?, position_sec = 0, status = 'playing' WHERE user_id = ?",
+           [playlistId, songId, u]);
+    db.run("INSERT INTO listening_history (user_id, song_id) VALUES (?, ?)", [u, songId]);
+    db.run("UPDATE songs SET play_count = play_count + 1 WHERE song_id = ?", [songId]);
+    save();
+  }
+
+  function playSong(songId, playlistId) {
+    return act(() => {
+      const u = uid();
+      readState(u);
+      if (!getQueue(playlistId).includes(songId)) throw new Error("This song is not in the selected queue");
+      startSong(u, playlistId, songId);
+    });
+  }
+
+  function playView() {
+    const list = visibleSongs();
+    if (list.length === 0) { alert("No songs to play"); return; }
+    playSong(list[0].song_id, view.type === "playlist" ? view.id : null);
+  }
+
+  function togglePlay() {
+    if (!state.song_id) { playView(); return; }
+    act(() => {
+      const u = uid();
+      if (state.status === "playing") {
+        db.run("UPDATE playback_state SET status = 'paused', position_sec = ? WHERE user_id = ?",
+               [Math.floor(state.position_sec), u]);
+      } else {
+        db.run("UPDATE playback_state SET status = 'playing' WHERE user_id = ?", [u]);
+      }
+      save();
+    });
+  }
+
+  // step = +1 for next song, -1 for previous song
+  function move(step) {
+    return act(() => {
+      const u = uid();
+      const st = readState(u);
+      const queue = getQueue(st.playlist_id);
+      if (queue.length === 0) throw new Error("Queue is empty");
+
+      let index;
+      if (shuffle && step > 0 && queue.length > 1) {
+        // Pick a random song that is not the current one
+        do { index = Math.floor(Math.random() * queue.length); }
+        while (queue[index] === st.song_id);
+      } else {
+        index = queue.includes(st.song_id) ? queue.indexOf(st.song_id) + step : 0;
+        if (repeat === "all") {
+          if (index >= queue.length) index = 0;
+          if (index < 0) index = queue.length - 1;
+        }
+      }
+
+      if (index >= 0 && index < queue.length) {
+        startSong(u, st.playlist_id, queue[index]);
+      } else {
+        db.run("UPDATE playback_state SET status = 'paused', position_sec = 0 WHERE user_id = ?", [u]);
+        save();
+      }
+    });
+  }
+
+  function restartSong() {
+    return act(() => {
+      const u = uid();
+      const st = readState(u);
+      if (st.song_id) startSong(u, st.playlist_id, st.song_id);
+    });
+  }
+
+  function toggleShuffle() { shuffle = !shuffle; updateModeButtons(); }
+
+  function cycleRepeat() {
+    repeat = repeat === "off" ? "all" : repeat === "all" ? "one" : "off";
+    updateModeButtons();
+  }
+
+  function updateModeButtons() {
+    $("shuffleBtn").classList.toggle("on", shuffle);
+    $("repeatBtn").classList.toggle("on", repeat !== "off");
+    $("repeatBtn").textContent = repeat === "one" ? "🔂" : "🔁";
+    $("repeatBtn").title = `Repeat: ${repeat}`;
+    $("shuffleBtn").title = `Shuffle: ${shuffle ? "on" : "off"}`;
+  }
+
+  function renderPlayer() {
+    $("nowTitle").textContent = state.song_title || "Nothing playing";
+    $("nowArtist").textContent = state.artist || "";
+    $("playBtn").textContent = state.status === "playing" ? "❚❚" : "▶";
+    const duration = state.duration_sec || 0;
+    const position = state.position_sec || 0;
+    $("posText").textContent = fmt(position);
+    $("durText").textContent = fmt(duration);
+    $("fill").style.width = duration ? (position / duration * 100) + "%" : "0%";
+  }
+
+  // Runs every second so the progress bar moves while a song plays
+  function tick() {
+    if (!db || !state.song_id || state.status !== "playing" || busy) return;
+    state.position_sec += 1;
+    if (state.position_sec >= state.duration_sec) {
+      busy = true;
+      const next = repeat === "one" ? restartSong() : move(1);
+      next.finally(() => busy = false);
+      return;
+    }
+    renderPlayer();
+  }
+
+  // Keyboard shortcuts: Space = play/pause, Arrow keys = previous/next
+  document.addEventListener("keydown", e => {
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
+    if (!$("adminMain").classList.contains("hidden")) return;
+    if (document.querySelector(".overlay")) return;
+    if (e.code === "Space") { e.preventDefault(); togglePlay(); }
+    else if (e.code === "ArrowRight") move(1);
+    else if (e.code === "ArrowLeft") move(-1);
+  });
+
+  // =====================================================================
+  //  TOP TABS
+  // =====================================================================
+  function showTab(tab) {
+    const isMusic = tab === "music";
+    $("musicMain").classList.toggle("hidden", !isMusic);
+    $("adminMain").classList.toggle("hidden", isMusic);
+    $("sidebar").classList.toggle("hidden", !isMusic);
+    $("tabMusic").classList.toggle("on", isMusic);
+    $("tabAdmin").classList.toggle("on", !isMusic);
+    if (!isMusic) loadAdminTables();
+  }
+
+  // =====================================================================
+  //  ADMIN PANEL
+  // =====================================================================
+  function loadAdminTables() {
+    const names = q("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name");
+    $("tables").innerHTML = names.map(t => {
+      const count = db.exec(`SELECT COUNT(*) FROM ${t.name}`)[0].values[0][0];
+      return `<div class="tb" onclick="showTable('${t.name}')">${t.name} <span>${count} rows</span></div>`;
+    }).join("");
+  }
+
+  function showTable(name) {
+    $("sql").value = `SELECT * FROM ${name} LIMIT 200;`;
+    runAdminQuery();
+  }
+
+  function usePreset(key) {
+    if (!key) return;
+    $("sql").value = PRESETS[key];
+    runAdminQuery();
+  }
+
+  function setStatus(text, isError) {
+    $("status").textContent = text;
+    $("status").className = isError ? "error" : "";
+  }
+
+  function runAdminQuery() {
+    const sql = $("sql").value.trim().replace(/;+\s*$/, "");
+    const firstWord = (sql.split(/\s+/)[0] || "").toLowerCase();
+    if (firstWord !== "select") { setStatus("Only SELECT queries are allowed in the admin panel", true); return; }
+    if (sql.includes(";")) { setStatus("Run one query at a time", true); return; }
+
+    try {
+      const result = db.exec(sql)[0] || { columns: [], values: [] };
+      setStatus(`${result.values.length} row(s) returned`, false);
+      $("result").innerHTML =
+        "<thead><tr>" + result.columns.map(c => `<th>${esc(c)}</th>`).join("") + "</tr></thead>" +
+        "<tbody>" + result.values.map(r =>
+          "<tr>" + r.map(v => `<td>${esc(v === null ? "NULL" : v)}</td>`).join("") + "</tr>").join("") +
+        "</tbody>";
+    } catch (e) {
+      setStatus("Error: " + e.message, true);
+      $("result").innerHTML = "";
+    }
+  }
+
+  function downloadDb() {
+    const blob = new Blob([db.export()], { type: "application/octet-stream" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "music_db.sqlite";
+    link.click();
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+
+  function resetDb() {
+    if (!confirm("This deletes all changes and restores the sample data. Continue?")) return;
+    localStorage.removeItem(STORAGE_KEY);
+    openDatabase();
+    view = { type: "all", id: null };
+    sortKey = null;
+    search = "";
+    $("searchBox").value = "";
+    fillUsers();
+    loadAdminTables();
+    loadAll();
+    setStatus("Database reset to sample data", false);
+  }
+
+  start();
+</script>
+</body>
+</html>
